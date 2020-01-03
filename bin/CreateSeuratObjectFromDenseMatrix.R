@@ -18,17 +18,18 @@ suppressPackageStartupMessages(library(doParallel))
 
 workdir.path <- '.'
 map_file_path <- './mapping_file'
-num_cpus <- 7
+num_cores <- 7
 
 # Handle args for command-line runs
-# TODO: Add numcpus for the %dopar% loops
 if ( !interactive()) {
   
   option_list = list(
       
     make_option(c("-w", "--workdir"), type="character", default=".", help="path to working dir", metavar="character"),
     
-    make_option(c("-m", "--mapfile"), type="character", default="mapping_file", help="mapping file name [default= %default]", metavar="character")
+    make_option(c("-m", "--mapfile"), type="character", default="mapping_file", help="mapping file name [default= %default]", metavar="character"),
+    
+    make_option(c("-c", "--numcores"), type="integer", default=7, help="Number of available cores for dopar tasks", metavar="character")
     
   )
   
@@ -43,10 +44,13 @@ if ( !interactive()) {
     map_file_path <- opt$mapfile
   }
 
+  if (!is.null(opt$numcores)) {
+    num_cores <- opt$numcores
+  }
   
 }
 
-registerDoParallel(cores=7)
+registerDoParallel(cores=num_cores)
 
 setwd(workdir.path)
 files <- Sys.glob('*.csv')
@@ -145,7 +149,7 @@ reformat_for_seurat <- function(x, samplename){
   x <- x[external_gene_name != "NA",]
   x <- as.data.frame(x)
   
-  message("sample: ",samplename)
+  #message("sample: ",samplename)
   
   row.names(x) <- x$external_gene_name
   x <- x[-1]
@@ -180,7 +184,7 @@ foreach( file=iter(files) ) %dopar% {
   # Make the seurat object (so)
   so <- reformat_for_seurat(dt, sample_id)
   seurat_filename <- paste0(seurat_files.path,'/',sample_id,'.seurat.Rdata')
-  message("seurat filename: ", seurat_filename)
+  #message("seurat filename: ", seurat_filename)
   save(so, file=seurat_filename )
   
   message(paste("Finished with",sample_id,sep=" "))
@@ -190,7 +194,7 @@ foreach( file=iter(files) ) %dopar% {
 # merge each group as neccessary:
 message("Merging seurat objects")
 setwd(seurat_files.path)
-for (group_x in unique(group.map$group)) {
+foreach (group_x =iter(sort(unique(group.map$group)))) %dopar% {
   
   message("merging group ",group_x)
   
@@ -212,7 +216,6 @@ for (group_x in unique(group.map$group)) {
 }
 
 # TODO: Add a %dopar% loop over the merged files to run seurat analysis steps.
-# TODO: THen continue with some downstream tools like enrichR, etc.
 # files <- 
 # for (file in files) {
 # 
@@ -251,3 +254,5 @@ for (group_x in unique(group.map$group)) {
 #   message( 'Sike')
 #   
 # }
+
+# TODO: THen continue with some downstream tools like enrichR, etc.
