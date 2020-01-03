@@ -17,6 +17,7 @@ suppressPackageStartupMessages(library(doParallel))
 # as part of a pipeline where this assumption can be trusted.)
 
 workdir.path <- '.'
+project_id <- 'IS022' # TODO: Get this from mapfile... should be able to handle more than one.
 map_file_path <- './mapping_file'
 
 # Handle args for command-line runs
@@ -27,12 +28,19 @@ if ( !interactive()) {
       
     make_option(c("-w", "--workdir"), type="character", default=".", help="path to working dir", metavar="character"),
     
-    make_option(c("-m", "--mapfile"), type="character", default="mapping_file", help="mapping file name [default= %default]", metavar="character")
+    make_option(c("-m", "--mapfile"), type="character", default="mapping_file", help="mapping file name [default= %default]", metavar="character"),
     
+    make_option(c("-p", "--project"), type="character", default=NULL, help="project id for this run", metavar="character")
+ 
   )
   
   opt_parser = OptionParser(option_list=option_list)
   opt = parse_args(opt_parser)
+  
+  if (is.null(opt$project)){
+    print_help(opt_parser)
+    stop("--project must be supplied!", call.=FALSE)
+  }
 
   if (!is.null(opt$workdir)) {
     workdir.path <- opt$workdir
@@ -41,7 +49,8 @@ if ( !interactive()) {
   if (!is.null(opt$mapfile)) {
     map_file_path <- opt$mapfile
   }
-
+  
+  project_id <- opt$project
   
 }
 
@@ -101,59 +110,16 @@ if ( file_test( '-f', ensg.genes.path ) ) {
 
 # TODO: Filter out 'blacklisted' genes
 
-# Create group.map based on map_file.  Bring in library but call it 'project' ala Seurat
-map_file <- as.data.frame(read.table(map_file_path))
-col_names <- c('library','sample_id','file_path','lanes','library_id','group')
-colnames(map_file) <- col_names
-group.map <- data.frame(matrix(ncol=2,nrow=0))
-for (row in 1:nrow(map_file)) {
-  
-  # store group-to-sample map, with multiple rows for samples mappin to multiple groups
-  if ( grepl( ',', map_file[row,'group'])) {
-
-    for (group in as.numeric(unlist(strsplit(as.character(map_file$group[row]),',')))) {
-
-        group.map <- rbind( group.map, 
-                            list( map_file$sample_id[row],
-                                  group
-                                ),
-                            stringsAsFactors=FALSE
-                          )
-    }
-    
-  } else {
-    
-    if ( !is.na(map_file[row,'group'])) {
-      
-      group.map <- rbind( group.map,
-                          list( map_file$sample_id[row],
-                                map_file$group[row]
-                              ),
-                          stringsAsFactors=FALSE
-                        )
-      
-    }
-    
-  }
-  
-}
-colnames(group.map) <- c('sample_id','group')
-
 # Just kinda pulling this out to avoid wall o' code
 reformat_for_seurat <- function(x, samplename){
   x <- x[external_gene_name != "NA",]
   x <- as.data.frame(x)
-  
-  message("sample: ",samplename)
-  
   row.names(x) <- x$external_gene_name
   x <- x[-1]
   barcodes <- names(x)
   barcodes <- paste0(barcodes, paste0(".", samplename))
   names(x) <- barcodes
-  x <- CreateSeuratObject( counts = x, 
-                           project = as.character(map_file$library[map_file$sample_id == samplename])
-                          )
+  x <- CreateSeuratObject(counts = x, project = project_id)
   x@meta.data$sample <- samplename
   return(x)
 }
@@ -186,6 +152,24 @@ foreach( file=iter(files) ) %dopar% {
   message(paste("Finished with",sample_id,sep=" "))
   
 }
+
+# Merge as directed by input mapping file
+map_file <- as.data.frame(read.table(map_file_path))
+col_names <- c('library','sample_id','file_path','lanes','library_id','group')
+colnames(map_file) <- col_names
+group.map <- data.frame(matrix(ncol=2,nrow=0))
+for (row in 1:nrow(map_file)) {
+  if ( grepl( ',', map_file[row,'group'])) {
+    for (group in as.numeric(unlist(strsplit(as.character(map_file$group[row]),',')))) {
+      group.map <- rbind(group.map,list(map_file$sample_id[row],group),stringsAsFactors=FALSE)
+    }
+  } else {
+    if ( !is.na(map_file[row,'group'])) {
+      group.map <- rbind(group.map,list(map_file$sample_id[row],map_file$group[row]),stringsAsFactors=FALSE)
+    }
+  }
+}
+colnames(group.map) <- c('sample_id','group')
 
 # merge each group as neccessary:
 message("Merging seurat objects")
