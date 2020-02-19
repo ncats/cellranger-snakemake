@@ -50,7 +50,7 @@ if ( !interactive()) {
   
 }
 
-registerDoParallel(cores=num_cores)
+registerDoParallel( cores=num_cores )
 
 setwd(workdir.path)
 files <- Sys.glob('*.csv')
@@ -113,7 +113,7 @@ colnames(map_file) <- col_names
 group.map <- data.frame(matrix(ncol=2,nrow=0))
 for (row in 1:nrow(map_file)) {
   
-  # store group-to-sample map, with multiple rows for samples mappin to multiple groups
+  # store group-to-sample map, with multiple rows for samples mapping to multiple groups
   if ( grepl( ',', map_file[row,'group'])) {
 
     for (group in as.numeric(unlist(strsplit(as.character(map_file$group[row]),',')))) {
@@ -163,8 +163,9 @@ reformat_for_seurat <- function(x, samplename){
   return(x)
 }
 
-
 seurat_files <- vector()
+message( "Creating Seurat Objects" )
+mcoptions=list(silent=TRUE)
 foreach( file=iter(files) ) %dopar% {
 
   sample_id <- str_split_fixed( file, ".csv", 2)[1]
@@ -204,55 +205,50 @@ foreach (group_x =iter(sort(unique(group.map$group)))) %dopar% {
   load(sample_one.file)
   group.merged <- so
     if (nrow(group.subset) > 1) {
-    for (sample_id in group.subset[2:nrow(group.subset),]$sample_id) {
-      sample_n.file <- paste0(sample_id,'.seurat.Rdata')
-      load(sample_n.file)
-      group.merged <- merge(group.merged,so)
+      for (sample_id in group.subset[2:nrow(group.subset),]$sample_id) {
+        sample_n.file <- paste0(sample_id,'.seurat.Rdata')
+        load(sample_n.file)
+        group.merged <- merge(group.merged,so)
+      }
     }
-  }
   group.merged.file <- paste0('group_',group_x,'.merged.seurat.Rdata')
   save(group.merged,file=file.path(group.merged.file))
   
 }
+files <- Sys.glob('group_*.merged.seurat.Rdata')
+foreach ( file=iter(files), .options.multicore=mcoptions  ) %dopar% {
 
-# TODO: Add a %dopar% loop over the merged files to run seurat analysis steps.
-# files <- 
-# for (file in files) {
-# 
-#   x = as.data.table(fread(file))
-#   
-#   message( 'Creating Seurat object.')
-#   x <- CreateSeuratObject(counts = x, project = "IS022")
-#   
-#   message('Normalizing Data')
-#   x <- NormalizeData(x)
-#   
-#   message('Findin Variable Features')
-#   x <- FindVariableFeatures(x)
-#   
-#   message('Scaling Data')
-#   x <- ScaleData(x, features = row.names(as.data.frame(x@assays$RNA@data)))
-#   Idents(x) <- 'sample'
-#   
-#   message( 'Running PCA')
-#   x <- RunPCA(x)
-#   
-#   message( 'Finding Neighbor')
-#   x <- FindNeighbors(x)   
-#   
-#   message( 'Finding Clusters')
-#   x <- FindClusters(x)
-#   
-#   message( 'Running tSNE')
-#   x <- RunTSNE(x)
-#   
-#   message( 'Running UMAP')
-#   x <- RunUMAP(x)
-#   
-#   message( 'Saving')
-#   save( x, paste( args[1], '.Seurat', sep = '' ))
-#   message( 'Sike')
-#   
-# }
+  load(file)
+  x <- group.merged
+  
+  message('Normalizing Data')
+  x <- NormalizeData(x)
+
+  message('Finding Variable Features')
+  x <- FindVariableFeatures(x)
+
+  message('Scaling Data')
+  x <- ScaleData(x, features = row.names(as.data.frame(x@assays$RNA@data)))
+  Idents(x) <- 'sample'
+
+  message( 'Running PCA')
+  x <- RunPCA(x)
+
+  message( 'Finding Neighbor')
+  x <- FindNeighbors(x)
+
+  message( 'Finding Clusters')
+  x <- FindClusters(x)
+
+  message( 'Running tSNE')
+  x <- RunTSNE(x)
+
+  message( 'Running UMAP')
+  x <- RunUMAP(x,dims=1:5)
+
+  message( 'Saving Final Seurat Object')
+  save( x, file=file)
+
+}
 
 # TODO: THen continue with some downstream tools like enrichR, etc.

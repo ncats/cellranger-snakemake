@@ -13,11 +13,13 @@ run_cellranger.pl -m [rundir mapping]
 
 =head1 OPTIONS
 
-B<--mapping_file, -m>       :   Mapping file describing libraries to run.
+B<--mapping_file, -m>       :   Tabular file relating libraries, samples, and groups.
 
 B<--working_dir, -w>        :   Working directory. [Default: . (cwd)]
 
 B<--run_aggr, -a>           :   Invoke cellranger's aggr step.
+
+B<--no_seurat>              :   Do NOT run the R script to create the seurat objects.
 
 B<--no_cleanup>             :   Do NOT remove existing files from prior runs.
 
@@ -29,18 +31,25 @@ B<--dry_run>                :   Create the output files but do not run.
 
 =head1 DESCRIPTION
 
-Create and run a Snakefile that controls several cellranger actions.  To wit:
+Create and run a Snakefile that controls several cellranger actions and downstream analysis.
+To wit:
 
     1. mkfastq
     2. count
     3. [optional] aggr
     4. mat2csv
+	5. [optional] seurat
 
-Note that Step 3, aggr (aggregation) is optional.
+Note that Steps 3 & 5, aggr (aggregation) and Seurat (R package) are optional.
+Step 3 is not run by default, it must be explicitly included via B<--run_aggr>;
+Step 5 is run by default, it must be explicitly excluded with B<--no_seurat>.
+Note that these two steps are (presently) mutually exclusive, as aggregating 
+the counts will create new files that are dissociated from the mapping found in
+the B<--mapping_file>.
 
-Additionally, this script will look for and remove any previously existing
-files (snakemake locks and cellranger __.mro files) to allow complete reruns
-to take place, unless B<--no_cleanup> is provided.
+This script will look for and remove any previously existing files (snakemake 
+locks and cellranger __.mro files) to allow complete reruns to take place, 
+unless B<--no_cleanup> is provided.
 
 =head1 INPUT
 
@@ -51,12 +60,14 @@ B<--mapping_file> should contain columns separated by tabs in the order:
     3. Raw Data Folder
     4. Lane
     5. Sample Barcode Index
+    6. Group designation
 
 where "Library ID" is the string to be used as an identifier for the sequencing 
-run found in the given "Raw Data Folder". Sample ID is provided to the cellranger
-commands as the value for --sample.  Lane is what should appear in the sample-sheet's
-'Lane' column, and Sample Barcode Index also is written to the sample sheet, as the
-'Index' column value.
+run found in the given "Raw Data Folder". "Sample ID" is provided to the cellranger
+commands as the value for --sample.  "Lane" is what should appear in the sample-sheet's
+'Lane' column, and "Sample Barcode Index" also is written to the sample sheet, as the
+'Index' column value.  "Group designation" determines which samples get merged into the
+same Seurat object during the Seurat step.
 
 =head1 OUTPUT
 
@@ -86,8 +97,20 @@ file passed in.
 In addition to these files, of course, there will be a large amount of
 data created by the cellranger command during the workflow execution.  Some of
 the intermediate data will be cleaned up by this tool unless the B<--no_cleanup>
-option is used.  [Well, once implemented.]
+option is used.
 
+When invoked with B<--dry_run>, the above list of files is created but the pipeline is
+not executed.  This allows fine-tuning of the cluster.config paramaters, among other
+things.  After editing as desired, the pipeline can be launched by running the
+following command (from an sinteractive session on a biowulf node, of course):
+
+  sbatch --cpus-per-task=2 --mem=12G --time=10-00:00:00 <work_dir>/cellranger.sh
+
+It is important not to skimp on the time allowance for this first command.  This
+command places the snakemake job on a new node, and must be able to launch and wait
+for the rest of the steps to execute.  It also asks for a nominal amount of resources
+to allow it to run the mat2csv cellranger command locally (that is, on the same node
+as the Snakemake process).  
 
 =head1 CONTACT
 
@@ -97,12 +120,13 @@ option is used.  [Well, once implemented.]
 =head1 TODO:
 
     1. declare intermediate files so snakemake automatically slims down the final disk usage
-    2. Better fine-tuning of cluster resources 
+    2. Better fine-tuning of cluster resources [especially for the seurat step]
 
 =cut
 
-use Cwd;
+use Cwd qw( abs_path getcwd);
 use File::Path;
+use FindBin qw($RealBin);
 use Getopt::Long qw( :config no_auto_abbrev no_ignore_case );
 use List::MoreUtils qw( first_index );
 use Pod::Usage;
@@ -110,10 +134,12 @@ use Text::CSV qw( csv );
 
 use Data::Dumper;
 
-my $datadir_base    = '/data/NCATS_ifx/data/Chromium';
+my $datadir_base            = '/data/NCATS_ifx/data/Chromium';
 #my $default_samplesheet_dir = "$datadir_base/sample-csvs";
 my $default_samplesheet_dir = "$datadir_base/inmanjm/sample-csvs";
-my $default_cluster_config = './cluster.config';
+my $default_cluster_config  = './cluster.config';
+my $default_mapping_file    = './mapping_file';
+my $seurat_cpus             = 32;
 
 my $default_working_dir = getcwd;
 
@@ -122,6 +148,7 @@ GetOptions( \%opts,
             'mapping_file|m=s',
             'working_dir|w=s',
             'run_aggr|a',
+			'no_seurat',
             'no_cleanup',
             'samplesheet_dir|s=s',
             'cluster_config|c=s',
@@ -134,7 +161,7 @@ check_params();
 chdir $opts{ working_dir } || die "$opts{ working_dir } is not accessible: $!\n";
 
 # Load in library & sample data
-my ( $libraries, $samples ) = load_libraries();
+my ( $libraries, $samples, $groups ) = load_libraries();
 
 # Create config.yaml for Snakefile
 create_config_file( $libraries );
@@ -149,7 +176,7 @@ my $aggr_csv = create_aggr_csv( $libraries ) if ( $opts{ run_aggr } );
 create_cluster_config() unless ( -f $opts{ cluster_config } );
 
 # Create Snakefile
-create_snakefile( $samples, $aggr_csv );
+create_snakefile( $samples, $aggr_csv, $libraries, $groups );
 
 # Cleanup?
 clean_existing_runs( $libraries );
@@ -164,7 +191,7 @@ exit(0);
 sub load_libraries {
 # Read in the mapping file and store the data in a hash ref for easy access.
 
-    my ( $libraries, @samples );
+    my ( $libraries, @samples, $groups );
     my @csv_header = ( 'Lane', 'Sample', 'Index' );
 
     my @mapfile_errors;
@@ -174,10 +201,17 @@ sub load_libraries {
 
         chomp;
 
-        my ( $library, $sample, $rundir, $lane, $index ) = split( "\t", $_ );
+        my ( $library, $sample, $rundir, $lane, $index, $group ) = split( "\t", $_ );
 
         if ( $library && $sample && $rundir && $lane && $index ) {
 
+            if ( not $opts{ no_seurat } and not defined($group) ) {
+
+                push @mapfile_errors, "Found this unexpected line in mapping file (missing group?):\n$_";
+                next;
+
+            }
+ 
             if ( -d $rundir ) {  
 
                 # Store rundir, begin csv:
@@ -197,9 +231,16 @@ sub load_libraries {
             push @{$libraries->{ $library }->{ samples }}, $sample;
             push @samples, $sample;
 
+            unless ( $opts{ no_seurat } ) {
+
+                $groups->{ $group }->{ $library }++;
+
+            }
+
         } else {
 
             push @mapfile_errors, "Found this unexpected line in mapping file:\n$_";
+
 
         }
 
@@ -212,7 +253,8 @@ sub load_libraries {
 
     }
 
-    return( $libraries, \@samples );
+
+    return( $libraries, \@samples, $groups );
 
 }
 
@@ -297,7 +339,7 @@ sub create_cluster_config {
     {
         "cpus-per-task"   : 2,
         "mem"             : "2G",
-        "time"            : "48:00:00"
+        "time"            : "24:00:00"
     },
     "cellranger_mkfastq" :
     {
@@ -308,12 +350,17 @@ sub create_cluster_config {
     {
         "cpus-per-task"   : 32,
         "mem"             : "120G",
-        "time"            : "4-00:00:00"
+        "time"            : "24:00:00"
     },
     "cellranger_aggr" :
     {
         "cpus-per-task"   : 12,
         "mem"             : "12G",
+    },
+    "R_seurat" :
+    {
+        "cpus-per-task"   : $seurat_cpus,
+        "mem"             : "120G",
     }
 }
 );
@@ -328,25 +375,24 @@ sub create_cluster_config {
 sub create_snakefile {
 # Create the Snakefile that will be executed by snakemake.
 
-    my ( $samples, $aggr_csv ) = @_;
+    my ( $samples, $aggr_csv, $libraries, $groups ) = @_;
 
     my ( $target_string, $count_output, $count_dir, $aggr_inputs );
 
+    $count_dir    = '"{sample}_count/outs/"';
+    $count_output = 'directory("{sample}_count/outs/filtered_feature_bc_matrix")';
 
+	# $target_string will vary depending on the parameters used
     if ( $opts{ run_aggr } ) {
 
         $aggr_inputs = join( ",\n        ", map{ "'$_"."_count/outs/molecule_info.h5'" } @$samples );
         $aggr_inputs =~ s/"//g;
 
         $count_output = '"{sample}_count/outs/molecule_info.h5"';
-        $count_dir    = '"{sample}_count/outs"';
 
         $target_string = "'aggr/outs/final.csv'";
 
-    } else {
-
-        $count_output = 'directory("{sample}_count/outs/filtered_feature_bc_matrix")';
-        $count_dir    = '"{sample}_count/outs/"';
+    } elsif ( $opts{no_seurat} ) {
 
         my @targets;
         for my $library ( sort { $a cmp $b } keys %$libraries ) {
@@ -360,7 +406,42 @@ sub create_snakefile {
         }
         $target_string = join( ",\n        ", @targets );
 
-    }
+    } else {
+
+        # Need to setup final targets as the seurat files that are to be made,
+        # named for the groups 
+        my @targets;
+        for my $group ( keys %$groups ) {
+
+			for my $library ( keys %{$groups->{ $group }} ) {
+
+	            push @targets, "'$opts{ working_dir }/$library/outs/seurat_files/group_"."$group.merged.seurat.Rdata'";
+
+			}
+
+        }
+
+        $target_string = join( ",\n        ", @targets );
+
+	}
+
+	## This will be either the 'rule all' input or the input for the seurat step:
+	my @file_list;
+	for my $library ( sort { $a cmp $b } keys %$libraries ) {
+
+		for my $sample ( sort { $a cmp $b } @{$libraries->{ $library }->{ samples }} ) {
+
+			push @file_list, "'$library/outs/$sample.csv'";
+
+		}
+
+	}
+	my $seurat_input_list;
+	if ( $opts{ no_seurat } ) {
+		$target_string = join( ",\n        ", @file_list );
+	} elsif ( ! $opts{ run_aggr } ) {
+		$seurat_input_list = join( ",\n        ", @file_list );
+	}
 
     my $snakefile = "$opts{ working_dir }/Snakefile"; 
     open( my $sfh, '>', $snakefile ) || die "Can't create snakefile $snakefile: $!\n";
@@ -456,6 +537,24 @@ rule cellranger_mat2csv:
         """
 );
 
+	unless ( $opts{ no_seurat } ) {
+
+		$contents .= qq(
+rule R_seurat:
+	input:
+		$seurat_input_list
+	params:
+		workdir="$opts{ working_dir }/{library}/outs/"
+	output:
+		"$opts{ working_dir }/{library}/outs/seurat_files/group_{group}.merged.seurat.Rdata"
+	shell:
+		"""
+		module load R
+		Rscript $RealBin/CreateSeuratObjectFromDenseMatrix.R --workdir {params.workdir}	 -c $seurat_cpus --mapfile $opts{ mapping_file }
+		"""
+);
+	}	
+
     # Thus, it is written.
     print $sfh $contents;
 
@@ -548,7 +647,6 @@ sub clean_existing_runs {
 
         }
 
-
     }
 
     if ( $opts{ run_aggr } ) {
@@ -633,12 +731,17 @@ sub check_params {
 
     if ( $opts{ mapping_file } ) {
 
+		$opts{ mapping_file } = abs_path( $opts{ mapping_file } );
+
         $errors .= "--mapping_file $opts{ mapping_file } doesn't exist or is empty!\n" 
             unless ( -s $opts{ mapping_file } );
 
     } else {
 
-        $errors .= "Please provide a --mapping_file\n";
+		$opts{ mapping_file } = abs_path( $default_mapping_file );
+		if ( ! -s $opts{ mapping_file } ) {
+	        $errors .= "Please provide a --mapping_file\n";
+		}
 
     }
 
