@@ -6,6 +6,7 @@ library(stringr)
 library(iterators)
 library(optparse)
 library(tools)
+library(ggplot2)
 suppressPackageStartupMessages(library(doParallel))
 
 
@@ -25,7 +26,7 @@ num_cores <- 7
 if ( !interactive() ) {
   
   option_list = list(
-      
+  
     make_option( c( "-w", "--workdir"), type="character", default=".", help="path to working dir", metavar="character" ),
     
     make_option( c( "-m", "--mapfile"), type="character", default="mapping_file", help="mapping file name [default= %default]", metavar="character" ),
@@ -53,6 +54,7 @@ if ( !interactive() ) {
 
 registerDoParallel( cores=num_cores )
 
+workdir.path <- normalizePath( workdir.path )
 setwd( workdir.path )
 
 # Need to get the path to the input files from the mapping file.
@@ -110,7 +112,10 @@ seurat_files.path <- file.path( workdir.path, 'seurat_files' )
 if ( !dir.exists( seurat_files.path ) ) {
   dir.create( seurat_files.path )
 }
-
+pdfdir.path <- file.path( workdir.path, 'pdfs' )
+if ( !dir.exists( pdfdir.path ) ) {
+  dir.create( pdfdir.path )
+}
 
 # Map the first file's Ensemble IDs to gene symbols:
 ensg.genes.path <- file.path( workdir.path, 'ensg.genes' )
@@ -171,10 +176,10 @@ reformat_for_seurat <- function( x, samplename ) {
   return(x)
 }
 
-seurat_files <- vector()
+seurat_files <- list()
 message( "Creating Seurat Objects" )
 mcoptions=list( silent=TRUE )
-foreach( input_file=iter( input_files ) ) %dopar% {
+foreach ( input_file=iter( input_files ) ) %dopar% {
 
   sample_id <- str_split_fixed( input_file, ".csv", 2 )[1]
   sample_id <- basename( sample_id )
@@ -219,7 +224,8 @@ foreach ( group_x =iter( sort( unique( group.map$group ) ) ) ) %dopar% {
   
   group.subset <- subset( group.map, group==group_x )
   if ( nrow( group.subset ) == 1 ) 
-    return(NULL)  # Looks strange, think "next" but for "%dopar%"
+    return(NULL)  # Looks strange, think "next" but for "%dopar%" since
+                  # foreach ... %dopar% is more like 'lapply' than 'for'
   
   message( "Merging group ", group_x )
   
@@ -248,6 +254,7 @@ foreach ( group_x =iter( sort( unique( group.map$group ) ) ) ) %dopar% {
 
 # Need to use a seperate loop to add merged files to the list of seurat files,
 # since %dopar% has no way of sharing objects between threads.
+# Althouhg... maybe using .combine would work? 
 for ( group_x in sort( unique( group.map$group ) ) ) {
 
   group.subset <- subset( group.map,group==group_x )
@@ -261,8 +268,28 @@ for ( group_x in sort( unique( group.map$group ) ) ) {
 }
 
 message( "Processing Seurat objects" )
-foreach ( seurat_filepath=iter( seurat_files ), .options.multicore=mcoptions, preschedule=F ) %dopar% {
+pdfs <- list()
 
+#for ( this in iter(seurat_files) ) {
+#  message("Found", this)
+#}
+#stop("foo")
+#message("Testing....")
+#message( seurat_files )
+#foreach ( seurat_filepath=iter( seurat_files ), options.multicore=mcoptions, preschedule=F ) %dopar% {
+#foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
+# 
+#    message( "Here:", seurat_filepath)
+#   
+#}
+#stop("Done testing")
+
+# Ugh not sure why preschedule=F suddenly stopped processing everything but the first job.
+# Until it gets straightened out, resort to %do%, because without it %dopar% invariably 
+# fails each time for a single job.  Note to self: Might need to specify a different number of cores?
+#foreach ( seurat_filepath=iter( seurat_files ), options.multicore=mcoptions, preschedule=F ) %dopar% {
+foreach ( seurat_filepath=iter( seurat_files ) ) %do% {
+    
   message( "Working on:", seurat_filepath )
   load( seurat_filepath )
   
@@ -285,7 +312,9 @@ foreach ( seurat_filepath=iter( seurat_files ), .options.multicore=mcoptions, pr
 
   message( 'Running PCA' )
   x <- RunPCA(x)
-
+  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "pcaplot.pdf" )
+  pdfs[[pdffile]] <- PCAPlot( x, pt.size = 1 )
+  
   message( 'Finding Neighbor' )
   x <- FindNeighbors(x)
 
@@ -294,21 +323,50 @@ foreach ( seurat_filepath=iter( seurat_files ), .options.multicore=mcoptions, pr
   
   message( 'Running tSNE' )
   x <- RunTSNE(x)
-
+  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "tsneplot.pdf" )
+  pdfs[[pdffile]] <- TSNEPlot( x, pt.size = 1 )
+  
   message( 'Running UMAP' )
   x <- RunUMAP( x, dims=1:5 )
+  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "umapplot.pdf" )
+  pdfs[[pdffile]] <- UMAPPlot( x, pt.size = 1 )
+  
+  
+  if ( str_detect( newname, 'group_') )  {
+  
+    message( 'Running FindAllMarkers')
+    DE_markers <- FindAllMarkers(x)
+  
+    clusters_up   <- setorder( setDT( DE_markers ), -avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
+    clusters_down <- setorder( setDT( DE_markers ),  avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
+  
+    pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "heatmap.pdf" )
+    pdfs[[pdffile]] <- DoHeatmap( x, features = c( clusters_up$V1, clusters_down$V1 ), raster=F ) +
+      scale_fill_gradientn( colors = rev( RColorBrewer::brewer.pal( n = 10, name = "RdBu" )) ) +
+      guides( color = FALSE)
 
-  # Add heat map code and output here
-    
-  # Hmmm this is turning the S4 into a df/table.
-  #message( 'Running FindAllMarkers')
-  #x <- FindAllMarkers(x)
-
+  }
+  
   message( 'Saving Final Seurat Object: ', newname )
   assign( newname, x )
   
   save( list=c( newname ), file=seurat_filepath )
   
+}
+
+# Print the pdfs generated above
+message( 'Writing pdfs to: ', pdfdir.path )
+
+pdfs
+
+setwd( pdfdir.path )
+
+for ( pdffile in pdfs ) {
+ 
+  pdf(pdffile)
+  pdfs[[pdffile]]
+  dev.off()
+
 }
 
 # TODO: continue with some downstream tools like enrichR (after running FindALlMarkers), etc.
