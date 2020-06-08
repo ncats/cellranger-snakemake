@@ -270,25 +270,13 @@ for ( group_x in sort( unique( group.map$group ) ) ) {
 message( "Processing Seurat objects" )
 pdfs <- list()
 
-#for ( this in iter(seurat_files) ) {
-#  message("Found", this)
-#}
-#stop("foo")
-#message("Testing....")
-#message( seurat_files )
+## Ugh! Sometimes with preschedule=F. %dopar% will finish but only process the first job.
+## Until that gets straightened out, change to %dopar% without preschedule=F,
+## but without it %dopar% sometimes has a job die, in which case settle for %do%. :(
+## Note to self: Might need to specify a particular number of cores based on the number of files?
 #foreach ( seurat_filepath=iter( seurat_files ), options.multicore=mcoptions, preschedule=F ) %dopar% {
-#foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
-# 
-#    message( "Here:", seurat_filepath)
-#   
-#}
-#stop("Done testing")
-
-# Ugh not sure why preschedule=F suddenly stopped processing everything but the first job.
-# Until it gets straightened out, resort to %do%, because without it %dopar% invariably 
-# fails each time for a single job.  Note to self: Might need to specify a different number of cores?
-#foreach ( seurat_filepath=iter( seurat_files ), options.multicore=mcoptions, preschedule=F ) %dopar% {
-foreach ( seurat_filepath=iter( seurat_files ) ) %do% {
+foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
+#foreach ( seurat_filepath=iter( seurat_files ) ) %do% {
     
   message( "Working on:", seurat_filepath )
   load( seurat_filepath )
