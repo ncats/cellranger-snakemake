@@ -21,6 +21,9 @@ suppressPackageStartupMessages(library(doParallel))
 workdir.path <- '.'
 map_file_path <- './mapping_file'
 num_cores <- 7
+filter_file <- './genes_to_filter.txt'
+biomartfile <- './Biomart_hsapiens_ensembl_gene_symbols.csv'
+create_biomartfile <- F
 
 # Handle args for command-line runs
 if ( !interactive() ) {
@@ -31,8 +34,14 @@ if ( !interactive() ) {
     
     make_option( c( "-m", "--mapfile"), type="character", default="mapping_file", help="mapping file name [default= %default]", metavar="character" ),
     
-    make_option( c( "-c", "--numcores"), type="integer", default=7, help="Number of available cores for dopar tasks", metavar="character" )
+    make_option( c( "-c", "--numcores"), type="integer", default=7, help="Number of available cores for dopar tasks", metavar="character" ),
     
+    make_option( c( "-f", "--filterfile"), type="character", default=filter_file, help="file to compare for genes to remove", metavar="character" ),
+
+    make_option( c( "-b", "--biomartfile"), type="character", default=biomartfile, help="file mapping ensembl gene id to gene symbols", metavar="character" ),
+    
+    make_option( c( "-B", "--newbiomartfile"), type="character", default=biomartfile, help="Create a new file mapping ensembl gene id to gene symbols", metavar="character" )
+
   )
   
   opt_parser = OptionParser( option_list=option_list )
@@ -48,6 +57,19 @@ if ( !interactive() ) {
 
   if ( !is.null( opt$numcores ) ) {
     num_cores <- opt$numcores
+  }
+  
+  if ( !is.null( opt$filterfile ) ) {
+    filter_file <- opt$filterfile
+  }
+  
+  if ( !is.null( opt$biomartfile ) ) {
+    biomartfile<- opt$biomartfile
+  }
+  
+  if ( !is.null( opt$newbiomartfile ) ) {
+    biomartfile<- opt$newbiomartfile
+    create_biomartfile <- T
   }
   
 }
@@ -117,6 +139,8 @@ if ( !dir.exists( pdfdir.path ) ) {
   dir.create( pdfdir.path )
 }
 
+
+# Use the provided Ensemble ID -> gene symbol map, or create the new one if asked.
 # Map the first file's Ensemble IDs to gene symbols:
 ensg.genes.path <- file.path( workdir.path, 'ensg.genes' )
 if ( file_test( '-f', ensg.genes.path ) ) {
@@ -125,7 +149,7 @@ if ( file_test( '-f', ensg.genes.path ) ) {
   message( paste0( "Found ", ensg.genes.path, ', and will use it instead of making it again.' ) )
   ensg.genes = fread( ensg.genes.path )
   
-} else {
+} else if ( create_biomartfile == T ) {
   
   # biomart is notoriously fickle.  Might have to do this a few times
   tries <- 0
@@ -154,10 +178,15 @@ if ( file_test( '-f', ensg.genes.path ) ) {
     stop( "Couldn't create the ensg2symbol mapping." )
   }
   
+} else {
+  
+  stop( "Couldn't find EnsembleID->gene mapping file." )
+
 }
 
-# TODO: Filter out 'blacklisted' genes
-
+# Filter out 'undesired' genes
+filter_genes <- fread( filter_file )
+ensg.genes <- ensg.genes[ ! external_gene_name %in% filter_genes$GeneSymbol ]
 
 # Just kinda pulling this out to avoid wall o' code
 reformat_for_seurat <- function( x, samplename ) {
@@ -274,7 +303,7 @@ pdfs <- list()
 ## Until that gets straightened out, change to %dopar% without preschedule=F,
 ## but without it %dopar% sometimes has a job die, in which case settle for %do%. :(
 ## Note to self: Might need to specify a particular number of cores based on the number of files?
-#foreach ( seurat_filepath=iter( seurat_files ), options.multicore=mcoptions, preschedule=F ) %dopar% {
+#foreach ( seurat_filepath=iter( seurat_files ), options.multicore=mcoptions, preschedule=F ) %dopar% 
 foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
 #foreach ( seurat_filepath=iter( seurat_files ) ) %do% {
     

@@ -163,6 +163,9 @@ create_snakefile( $samples, $libraries, $groups );
 # Cleanup?
 clean_existing_runs( $libraries );
 
+# Copy datafiles for the R script
+copy_R_datafiles() unless ( $opts{ no_seurat } );
+
 # Run snakemake via hpc
 create_snake_shell();
 run_snakemake();
@@ -603,6 +606,34 @@ EOF
 
 }
 
+
+sub copy_R_datafiles {
+
+	my @files = ( 'Biomart_hsapiens_ensembl_gene_symbols.csv',
+				  'genes_to_filter.txt' );
+
+	my $errors = '';
+
+	for my $filename ( @files ) {
+
+		my $oldpath = "$RealBin/$filename";
+		my $newpath = "$opts{ working_dir }/$filename";
+
+		if ( -s $oldpath ) {
+
+			cp $oldpath, $newpath;
+
+		} else {
+
+			$errors .= "Can't find $oldpath, or it is empty\n";
+
+		}
+
+	}
+
+	die $errors if $errors;
+
+}
 
 sub run_snakemake {
 
