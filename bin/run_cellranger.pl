@@ -113,6 +113,7 @@ as the Snakemake process).
 =cut
 
 use Cwd qw( abs_path getcwd);
+use File::Copy;
 use File::Path;
 use FindBin qw($RealBin);
 use Getopt::Long qw( :config no_auto_abbrev no_ignore_case );
@@ -621,7 +622,7 @@ sub copy_R_datafiles {
 
 		if ( -s $oldpath ) {
 
-			cp $oldpath, $newpath;
+			copy $oldpath, $newpath;
 
 		} else {
 
