@@ -283,7 +283,7 @@ foreach ( group_x =iter( sort( unique( group.map$group ) ) ) ) %dopar% {
 
 # Need to use a seperate loop to add merged files to the list of seurat files,
 # since %dopar% has no way of sharing objects between threads.
-# Althouhg... maybe using .combine would work? 
+# Although... maybe using .combine would work? 
 for ( group_x in sort( unique( group.map$group ) ) ) {
 
   group.subset <- subset( group.map,group==group_x )
@@ -299,14 +299,8 @@ for ( group_x in sort( unique( group.map$group ) ) ) {
 message( "Processing Seurat objects" )
 pdfs <- list()
 
-## Ugh! Sometimes with preschedule=F. %dopar% will finish but only process the first job.
-## Until that gets straightened out, change to %dopar% without preschedule=F,
-## but without it %dopar% sometimes has a job die, in which case settle for %do%. :(
-## Note to self: Might need to specify a particular number of cores based on the number of files?
-#foreach ( seurat_filepath=iter( seurat_files ), options.multicore=mcoptions, preschedule=F ) %dopar% 
 foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
-#foreach ( seurat_filepath=iter( seurat_files ) ) %do% {
-    
+
   message( "Working on:", seurat_filepath )
   load( seurat_filepath )
   
@@ -330,7 +324,8 @@ foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
   message( 'Running PCA' )
   x <- RunPCA(x)
   pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "pcaplot.pdf" )
-  pdfs[[pdffile]] <- PCAPlot( x, pt.size = 1 )
+  PCAPlot( x, pt.size = 2 )
+  ggsave(filename = paste0(pdfdir.path,"/",pdffile), width=10, height=10 )
   
   message( 'Finding Neighbor' )
   x <- FindNeighbors(x)
@@ -341,13 +336,14 @@ foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
   message( 'Running tSNE' )
   x <- RunTSNE(x)
   pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "tsneplot.pdf" )
-  pdfs[[pdffile]] <- TSNEPlot( x, pt.size = 1 )
+  TSNEPlot( x, pt.size = 1 )
+  ggsave(filename = paste0(pdfdir.path,"/",pdffile), width=10, height=10 )
   
   message( 'Running UMAP' )
   x <- RunUMAP( x, dims=1:5 )
   pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "umapplot.pdf" )
-  pdfs[[pdffile]] <- UMAPPlot( x, pt.size = 1 )
-  
+  UMAPPlot( x, pt.size = 1 )
+  ggsave(filename = paste0(pdfdir.path,"/",pdffile), width=10, height=10 )
   
   if ( str_detect( newname, 'group_') )  {
   
@@ -358,12 +354,13 @@ foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
     clusters_down <- setorder( setDT( DE_markers ),  avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
   
     pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "heatmap.pdf" )
-    pdfs[[pdffile]] <- DoHeatmap( x, features = c( clusters_up$V1, clusters_down$V1 ), raster=F ) +
+    DoHeatmap( x, features = c( clusters_up$gene, clusters_down$gene ), raster=F ) +
       scale_fill_gradientn( colors = rev( RColorBrewer::brewer.pal( n = 10, name = "RdBu" )) ) +
       guides( color = FALSE)
+    ggsave(filename = paste0(pdfdir.path,"/",pdffile), width=10, height=10 )
 
   }
-  
+    
   message( 'Saving Final Seurat Object: ', newname )
   assign( newname, x )
   
@@ -371,19 +368,3 @@ foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
   
 }
 
-# Print the pdfs generated above
-message( 'Writing pdfs to: ', pdfdir.path )
-
-pdfs
-
-setwd( pdfdir.path )
-
-for ( pdffile in pdfs ) {
- 
-  pdf(pdffile)
-  pdfs[[pdffile]]
-  dev.off()
-
-}
-
-# TODO: continue with some downstream tools like enrichR (after running FindALlMarkers), etc.
