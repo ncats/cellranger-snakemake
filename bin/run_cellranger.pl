@@ -123,7 +123,8 @@ use Text::CSV qw( csv );
 
 use Data::Dumper;
 
-my $default_samplesheet_dir = "./sample-csvs";
+my $default_samplesheet_dir = "sample-csvs";  # Note: using './' for relative paths is "strongly
+                                              # discouraged by snakemake for being "redundant".
 my $default_cluster_config  = './cluster.config';
 my $default_mapping_file    = './mapping_file';
 my $seurat_cpus             = 32;
@@ -263,11 +264,23 @@ sub create_config_file {
 
         for my $sample ( sort { $a cmp $b } @{$libraries->{ $library }->{ samples }} ) {
 
-            print $cfh  "    $sample: $library"."_mkfastq/outs/fastq_path/\n";
+            print $cfh  "    $sample: $library"."_mkfastq/outs/fastq_path\n";
 
         }
 
     }
+
+	print $cfh "sample_libraries:\n";
+	for my $library ( keys %$libraries ) {
+
+        for my $sample ( sort { $a cmp $b } @{$libraries->{ $library }->{ samples }} ) {
+
+            print $cfh  "    $sample: $library\n";
+
+        }
+
+    }
+
 
 }
 
@@ -309,7 +322,7 @@ sub create_cluster_config {
     {
         "cpus-per-task"   : 32,
         "mem"             : "120G",
-        "time"            : "48:00:00"
+        "time"            : "3-00:00:00"
     },
     "R_seurat" :
     {
@@ -425,11 +438,13 @@ rule cellranger_mkfastq:
         rundir = lambda wildcards: config["rundirs"][wildcards.library],
         csv = "$opts{ samplesheet_dir }/{library}.csv"
     output:
-        directory("{library}_mkfastq/outs/fastq_path/")
+        directory("{library}_mkfastq/outs/fastq_path")
     shell:
         """
         module load cellranger
-        rmdir -p {output}
+        if [ -d {wildcards.library}_mkfastq ]; then 
+            rm -rf {wildcards.library}_mkfastq
+        fi
         cellranger mkfastq --id={wildcards.library}_mkfastq \\
         --run={input.rundir} --csv={input.csv} \\
         --localcores=12 --localmem=12
@@ -439,17 +454,20 @@ rule cellranger_count:
     input:
         lambda wildcards: config["count_inputs"][wildcards.sample]
     params:
-        out_dir = $count_dir
+        out_dir = $count_dir,
+		library = lambda wildcards: config["sample_libraries"][wildcards.sample]
     output:
         $count_output
     shell:
         """
         module load cellranger
-        rmdir -p {params.out_dir}
+        if [ -d {params.out_dir} ]; then rm -rf {params.out_dir}; fi
         cellranger count --id={wildcards.sample}_count \\
         --fastqs={input} --sample={wildcards.sample} \\
         --transcriptome=/fdb/cellranger/refdata-cellranger-GRCh38-1.2.0 \\
         --localcores=32 --localmem=120
+        cp {wildcards.sample}_count/outs/web_summary.html \\
+        {params.library}/outs/{wildcards.sample}_web_summary.html
         """
 
 rule cellranger_mat2csv:
@@ -596,7 +614,7 @@ snakemake -n --dag | dot -Tsvg > ./dag.cellranger.svg
 # https://hpc.nih.gov/apps/snakemake.html
 
 sbcmd="sbatch --cpus-per-task={cluster.cpus-per-task} --mem={cluster.mem} --exclusive --constraint=x2650 --time={cluster.time}"
-snakemake --cluster-config $opts{ cluster_config } --cluster "\$sbcmd" --latency-wait=120 --jobs=32
+snakemake --cluster-config $opts{ cluster_config } --cluster "\$sbcmd" --latency-wait=180 --jobs=32
 
 EOF
 
@@ -610,29 +628,30 @@ EOF
 
 sub copy_R_datafiles {
 
-	my @files = ( 'Biomart_hsapiens_ensembl_gene_symbols.csv',
-				  'genes_to_filter.txt' );
+    my @files = ( 'Biomart_hsapiens_ensembl_gene_symbols.csv',
+                  'genes_to_filter.txt',
+                  'enrichr_libraries.txt' );
 
-	my $errors = '';
+    my $errors = '';
 
-	for my $filename ( @files ) {
+    for my $filename ( @files ) {
 
-		my $oldpath = "$RealBin/$filename";
-		my $newpath = "$opts{ working_dir }/$filename";
+        my $oldpath = "$RealBin/$filename";
+        my $newpath = "$opts{ working_dir }/$filename";
 
-		if ( -s $oldpath ) {
+        if ( -s $oldpath ) {
 
-			copy $oldpath, $newpath;
+            copy $oldpath, $newpath;
 
-		} else {
+        } else {
 
-			$errors .= "Can't find $oldpath, or it is empty\n";
+            $errors .= "Can't find $oldpath, or it is empty\n";
 
-		}
+        }
 
-	}
+    }
 
-	die $errors if $errors;
+    die $errors if $errors;
 
 }
 
