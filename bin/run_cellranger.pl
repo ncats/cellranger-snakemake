@@ -270,8 +270,8 @@ sub create_config_file {
 
     }
 
-	print $cfh "sample_libraries:\n";
-	for my $library ( keys %$libraries ) {
+    print $cfh "sample_libraries:\n";
+    for my $library ( keys %$libraries ) {
 
         for my $sample ( sort { $a cmp $b } @{$libraries->{ $library }->{ samples }} ) {
 
@@ -455,7 +455,7 @@ rule cellranger_count:
         lambda wildcards: config["count_inputs"][wildcards.sample]
     params:
         out_dir = $count_dir,
-		library = lambda wildcards: config["sample_libraries"][wildcards.sample]
+        library = lambda wildcards: config["sample_libraries"][wildcards.sample]
     output:
         $count_output
     shell:
@@ -466,6 +466,7 @@ rule cellranger_count:
         --fastqs={input} --sample={wildcards.sample} \\
         --transcriptome=/fdb/cellranger/refdata-cellranger-GRCh38-1.2.0 \\
         --localcores=32 --localmem=120
+        mkdir -p {params.library}/outs/
         cp {wildcards.sample}_count/outs/web_summary.html \\
         {params.library}/outs/{wildcards.sample}_web_summary.html
         """
