@@ -10,14 +10,13 @@ library(ggplot2)
 suppressPackageStartupMessages(library(doParallel))
 library(enrichR, quietly = T)
 
-
 # NOTE: This script assumes:
 # 1. That the files within the supplied directory are all part of the same run
 # (This assumption means we can convert a single file's Ensemble Gene IDs into
 # Gene Symbols via Ensembl Mart and it will map to all other input files)
-# 2. That all .csv files reside within a directory created by the cellranger
-# Snakemake pipeline.  This assumption allows us to find the .csv's based upon
-# info in the supplied mapping_file
+# 2. That all input .txt/.csv files reside within a directory created by the 
+# cellranger Snakemake pipeline.  This assumption allows us to find the .csv's
+# based upon info in the supplied mapping_file.
 
 workdir.path <- '.'
 map_file_path <- './mapping_file'
@@ -89,7 +88,7 @@ workdir.path <- normalizePath( workdir.path )
 setwd( workdir.path )
 
 # Need to get the path to the input files from the mapping file.
-# While doing so, grab other releveant information for later use.
+# While doing so, grab other relevant information for later use.
 
 # Create group.map based on map_file.  Bring in library but call it 'project' ala Seurat
 map_file <- as.data.frame( read.table( map_file_path ) )
@@ -362,17 +361,19 @@ foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
     message( 'Running FindAllMarkers')
     DE_markers <- FindAllMarkers(x)
 
-    clusters_up   <- setorder( setDT( DE_markers ), -avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
     clusters_down <- setorder( setDT( DE_markers ),  avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
+    clusters_up   <- setorder( setDT( DE_markers ), -avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
+    
+    fwrite( DE_markers, paste0( DE_dir.path, "/", str_replace( seurat_filepath, "seurat\\.Rdata", "clusters.csv" )))
 
     fwrite( clusters_up, paste0( DE_dir.path, "/", str_replace( seurat_filepath, "seurat\\.Rdata", "clusters_up.csv" )))
     fwrite( clusters_down, paste0( DE_dir.path, "/", str_replace( seurat_filepath, "seurat\\.Rdata", "clusters_down.csv" )))
 
     write( clusters_up$gene, paste0( DE_dir.path, "/", str_replace( seurat_filepath, "seurat\\.Rdata", "genes.up.txt" )))
     write( clusters_down$gene, paste0( DE_dir.path, "/", str_replace( seurat_filepath, "seurat\\.Rdata", "genes.down.txt" )))
-
+    
     pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "heatmap.pdf" )
-    DoHeatmap( x, features = c( clusters_up$gene, clusters_down$gene ), raster=F ) +
+    DoHeatmap( x, features = clusters_up$gene[1:50], raster=F ) +
       scale_fill_gradientn( colors = rev( RColorBrewer::brewer.pal( n = 10, name = "RdBu" )) ) +
       guides( color = FALSE)
     ggsave(filename = paste0(pdfdir.path,"/",pdffile), width=10, height=10 )
