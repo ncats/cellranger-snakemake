@@ -183,6 +183,14 @@ sub load_libraries {
 
     my @mapfile_errors;
 
+    # Might need to remove ^M chars from the mapping file:
+    if ( `grep -P '\r' $opts{ mapping_file }` ) {
+
+        my @syscmd = ('perl', '-p', '-i', '-e', '"s/\r//g"', $opts{ mapping_file } );
+        system( @syscmd ) && die "Found ^M characters in the mapping file and couldn't remove them.\n"; 
+
+    }
+
     open( my $mfh, '<', $opts{ mapping_file } ) || die "Can't open mapping file: $!\n";
     while( <$mfh> ) {
 
