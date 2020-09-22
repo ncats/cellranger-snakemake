@@ -25,6 +25,8 @@ B<--samplesheet_dir, -s>    :   Path to dir in which samplesheet .csv files will
 
 B<--cluster_config, -c>     :   Path to a file containing cluster resource specifications.
 
+B<--count_reference>		: 	Specify a path to a custom reference for use with cellranger count.
+
 B<--dry_run>                :   Create the output files but do not run.
 
 =head1 DESCRIPTION
@@ -61,6 +63,14 @@ commands as the value for --sample.  "Lane" is what should appear in the sample-
 'Lane' column, and "Sample Barcode Index" also is written to the sample sheet, as the
 'Index' column value.  "Group designation" determines which samples get merged into the
 same Seurat object during the Seurat step.
+
+By default, the pipeline will use the GRCh38 human reference genome for the B<--transcriptome>
+argument in the cellranger count step of the pipeline.  Users may provide a path to a custom
+genome reference directory to be used by the cellranger count command by passing it in with
+B<--count_reference>.  For more info on how to create such references, refer to:
+	https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/advanced/references
+and
+	https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/using/tutorial_mr
 
 =head1 OUTPUT
 
@@ -128,6 +138,7 @@ my $default_samplesheet_dir = "sample-csvs";  # Note: using './' for relative pa
 my $default_cluster_config  = './cluster.config';
 my $default_mapping_file    = './mapping_file';
 my $seurat_cpus             = 32;
+my $default_count_ref_dir   = '/fdb/cellranger/refdata-cellranger-GRCh38-1.2.0'; 
 
 my $default_working_dir = getcwd();
 
@@ -140,6 +151,7 @@ GetOptions( \%opts,
             'samplesheet_dir|s=s',
             'cluster_config|c=s',
             'dry_run',
+			'count_reference=s',
             'help|h',
            ) || die "Error getting options! $!\n";
 pod2usage( -verbose => 2, -exitval => 1 ) if $opts{ help };
@@ -472,7 +484,7 @@ rule cellranger_count:
         if [ -d {params.out_dir} ]; then rm -rf {params.out_dir}; fi
         cellranger count --id={wildcards.sample}_count \\
         --fastqs={input} --sample={wildcards.sample} \\
-        --transcriptome=/fdb/cellranger/refdata-cellranger-GRCh38-1.2.0 \\
+        --transcriptome=$opts{ count_reference } \\
         --localcores=32 --localmem=120
         mkdir -p {params.library}/outs/
         cp {wildcards.sample}_count/outs/web_summary.html \\
@@ -711,6 +723,8 @@ sub check_params {
     mkdir $opts{ samplesheet_dir } unless ( -d $opts{ samplesheet_dir } );
 
     $opts{ cluster_config } = $opts{ cluster_config } // $default_cluster_config;
+
+	$opts{ count_reference } = $opts{ count_reference } // $default_count_ref_dir;
 
     die $errors if $errors;
 
