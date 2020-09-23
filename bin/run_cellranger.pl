@@ -198,7 +198,7 @@ sub load_libraries {
     # Might need to remove ^M chars from the mapping file:
     if ( `grep -P '\r' $opts{ mapping_file }` ) {
 
-        my @syscmd = ('perl', '-p', '-i', '-e', '"s/\r//g"', $opts{ mapping_file } );
+        my @syscmd = ('dos2unix', $opts{ mapping_file } );
         system( @syscmd ) && die "Found ^M characters in the mapping file and couldn't remove them.\n"; 
 
     }
