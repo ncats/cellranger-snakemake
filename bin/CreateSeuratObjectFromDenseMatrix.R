@@ -25,6 +25,7 @@ filter_file <- './genes_to_filter.txt'
 biomartfile <- './Biomart_hsapiens_ensembl_gene_symbols.csv'
 enrichrlibfile <- './enrichr_libraries.txt'
 create_biomartfile <- F
+output_dir <- workdir.path
 
 # Handle args for command-line runs
 if ( !interactive() ) {
@@ -43,8 +44,10 @@ if ( !interactive() ) {
 
     make_option( c( "-e", "--enrichrlibfile"), type="character", default=enrichrlibfile, help="file describing which libraries to use for enrichR", metavar="character" ),
 
-    make_option( c( "-B", "--newbiomartfile"), type="character", default=biomartfile, help="Create a new file mapping ensembl gene id to gene symbols", metavar="character" )
+    make_option( c( "-B", "--newbiomartfile"), type="character", default=biomartfile, help="Create a new file mapping ensembl gene id to gene symbols", metavar="character" ),
 
+    make_option( c( "-o", "--output_dir"), type="character", default=output_dir, help="path to output_dir [default=workdir]", metavar="character")
+    
   )
 
   opt_parser = OptionParser( option_list=option_list )
@@ -52,6 +55,7 @@ if ( !interactive() ) {
 
   if ( !is.null( opt$workdir ) ) {
     workdir.path <- opt$workdir
+    output_dir <- opt$workdir
   }
 
   if ( !is.null( opt$mapfile ) ) {
@@ -79,7 +83,13 @@ if ( !interactive() ) {
     biomartfile <- opt$newbiomartfile
     create_biomartfile <- T
   }
+  
+  if ( !is.null( opt$output_dir ) ) {
+    output_dir <- opt$output_dir 
+  }
 
+  output_dir <- normalizePath( output_dir )
+  
 }
 
 registerDoParallel( cores=num_cores )
@@ -138,15 +148,15 @@ countfiles.path <- file.path( workdir.path, 'Countfiles_gene_symbol' )
 if ( !dir.exists( countfiles.path ) ) {
   dir.create( countfiles.path )
 }
-seurat_files.path <- file.path( workdir.path, 'seurat_files' )
+seurat_files.path <- file.path( output_dir, 'seurat_files' )
 if ( !dir.exists( seurat_files.path ) ) {
   dir.create( seurat_files.path )
 }
-pdfdir.path <- file.path( workdir.path, 'pdfs' )
+pdfdir.path <- file.path( output_dir, 'pdfs' )
 if ( !dir.exists( pdfdir.path ) ) {
   dir.create( pdfdir.path )
 }
-DE_dir.path <- file.path(workdir.path, 'DE_dir' )
+DE_dir.path <- file.path( output_dir, 'DE_dir' )
 if ( !dir.exists( DE_dir.path ) ) {
   dir.create( DE_dir.path )
 }
@@ -346,16 +356,26 @@ foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
 
   message( 'Running tSNE' )
   x <- RunTSNE(x)
-  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "tsneplot.pdf" )
+  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "tsneplot_by_cluster.pdf" )
   TSNEPlot( x, pt.size = 1 )
   ggsave(filename = paste0(pdfdir.path,"/",pdffile), width=10, height=10 )
 
   message( 'Running UMAP' )
   x <- RunUMAP( x, dims=1:5 )
-  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "umapplot.pdf" )
+  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "umapplot_by_cluster.pdf" )
   UMAPPlot( x, pt.size = 1 )
   ggsave(filename = paste0(pdfdir.path,"/",pdffile), width=10, height=10 )
 
+  # Now make versions of the plots colored by sample
+  Idents(x) <- 'sample'
+  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "tsneplot_by_sample.pdf" )
+  TSNEPlot( x, pt.size = 1 )
+  ggsave( filename = paste0( pdfdir.path, "/", pdffile ), width = 10, height = 10 )
+  
+  pdffile = str_replace( seurat_filepath, "seurat\\.Rdata", "umapplot_by_sample.pdf" )
+  UMAPPlot( x, pt.size = 1 )
+  ggsave( filename = paste0( pdfdir.path, "/", pdffile ), width = 10, height = 10 )  
+  
   if ( str_detect( newname, 'group_') )  {
 
     message( 'Running FindAllMarkers')
