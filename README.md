@@ -35,14 +35,7 @@ ignored during merging by setting this field to 'NA'.
 
 ## TODO:
 
-	1. [ ] Default to using the biomart file found in ./bin, recreate in workdir if asked.
-	2. [ ] Better documentation describing setup, pipeline execution, etc.
-	3. [ ] Create tSNE, UMAP plots as pdfs
-	4. [ ] Add FindAllMarkers and create various heatmaps
-	5. [ ] Add EnrichR after FindAllMarkers
-	6. [ ] Add filtration of various 'noisy' genes
-	7. [ ] Cleanup intermediate files (could be done using native snakemake nomenclature)
-	8. [ ] Restore %dopar% functionality for main processing loop of seurat objects.
+	1. [ ]Cleanup intermediate files (could be done using native snakemake nomenclature)
 
 ## Author
 
