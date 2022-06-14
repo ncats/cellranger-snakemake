@@ -29,6 +29,8 @@ B<--count_reference>		: 	Specify a path to a custom reference for use with cellr
 
 B<--dry_run>                :   Create the output files but do not run.
 
+B<--filter_single_index>    :   Pass the '--filter-single-index' argument to mkfastq
+
 =head1 DESCRIPTION
 
 Create and run a Snakefile that controls several cellranger actions and downstream analysis.
@@ -152,6 +154,7 @@ GetOptions( \%opts,
             'cluster_config|c=s',
             'dry_run',
 			'count_reference=s',
+            'filter_single_index',
             'help|h',
            ) || die "Error getting options! $!\n";
 pod2usage( -verbose => 2, -exitval => 1 ) if $opts{ help };
@@ -466,7 +469,14 @@ rule cellranger_mkfastq:
             rm -rf {wildcards.library}_mkfastq
         fi
         cellranger mkfastq --id={wildcards.library}_mkfastq \\
-        --run={input.rundir} --csv={input.csv} \\
+        --run={input.rundir} --csv={input.csv} \\);
+
+    if ( $opts { filter_single_index } ) {
+        $contents .= qq( \\
+        --filter-single-index \\);
+    }
+
+    $contents .= qq(
         --localcores=12 --localmem=12
         """
 
