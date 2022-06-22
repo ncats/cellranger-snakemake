@@ -211,6 +211,7 @@ ensg.genes <- ensg.genes[ ! external_gene_name %in% filter_genes$GeneSymbol ]
 
 # Just kinda pulling this out to avoid wall o' code
 reformat_for_seurat <- function( x, samplename ) {
+
   x <- x[external_gene_name != "NA", ]
   x <- as.data.frame(x)
 
@@ -219,11 +220,16 @@ reformat_for_seurat <- function( x, samplename ) {
   barcodes <- names(x)
   barcodes <- paste0( barcodes, paste0( ".", samplename ) )
   names(x) <- barcodes
+
+  x <- x[row.names(x) != "",]
+
   x <- CreateSeuratObject( counts = x, 
                            project = as.character( map_file$library[ map_file$sample_id == samplename ] )
                           )
+
   x@meta.data$sample <- samplename
   return(x)
+
 }
 
 seurat_files <- list()
@@ -244,6 +250,9 @@ foreach ( input_file=iter( input_files ) ) %dopar% {
   dt <- dt[ !duplicated( external_gene_name ), ]
   cols <- names(dt)[ c( 1:( length( names(dt) )-1 ) ) ]
   dt<- subset( dt, select=c( "external_gene_name", cols ) )
+
+  dt$external_gene_name <- sub(dt$external_gene_name, pattern = "-", replacement = "_", fixed = TRUE )
+
   fwrite( dt, paste0( countfiles.path, '/', sample_id, '_gene_symbol.csv'), col.names=T, row.names=F, quote=F, sep="," )
 
   # Make the seurat object (so)
@@ -381,9 +390,9 @@ foreach ( seurat_filepath=iter( seurat_files ) ) %dopar% {
     message( 'Running FindAllMarkers')
     DE_markers <- FindAllMarkers(x)
 
-    clusters_down <- setorder( setDT( DE_markers ),  avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
-    clusters_up   <- setorder( setDT( DE_markers ), -avg_logFC )[ , head( .SD, 100 ), keyby='cluster' ]
-    
+    clusters_down <- setorder( setDT( DE_markers ),  avg_log2FC )[ , head( .SD, 100 ), keyby='cluster' ]
+    clusters_up   <- setorder( setDT( DE_markers ), -avg_log2FC )[ , head( .SD, 100 ), keyby='cluster' ]
+
     fwrite( DE_markers, paste0( DE_dir.path, "/", str_replace( seurat_filepath, "seurat\\.Rdata", "clusters.csv" )))
 
     fwrite( clusters_up, paste0( DE_dir.path, "/", str_replace( seurat_filepath, "seurat\\.Rdata", "clusters_up.csv" )))
