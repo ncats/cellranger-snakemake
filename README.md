@@ -1,3 +1,5 @@
+This repository has been archived and is no longer maintained.The code is provided for historical reference and may contain unpatched or unknown vulnerabilities. It should not be used in production systems.
+
 # run_cellranger.pl
 
 Create and run a snakemake pipeline that launches cellranger commands to biowulf.
@@ -41,4 +43,3 @@ ignored during merging by setting this field to 'NA'.
 
   Jason Inman
   inmanjm@nih.gov
-
